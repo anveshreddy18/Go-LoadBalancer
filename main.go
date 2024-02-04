@@ -1,10 +1,14 @@
 package main
 
 import (
+	"net"
 	"net/http/httputil"
 	"net/url"
 	"sync"
 	"sync/atomic"
+	"time"
+
+	"github.com/sirupsen/logrus"
 )
 
 // Define Backend struct
@@ -67,6 +71,44 @@ func (s *ServerList) GetNextPeer() *Backend {
 	return nil
 }
 
+// It tries to establishes a tcp connection with the backend to see if it's alive
+func isBackendAlive(url *url.URL) bool {
+	newConn, err := net.DialTimeout("tcp", url.Host, 2*time.Second)
+	if err != nil {
+		logrus.Infof("Connection could not be established, error: %v", err)
+		return false
+	}
+	defer newConn.Close()
+	return true
+}
+
+func (s *ServerList) HealthCheck() {
+	for _, b := range s.backends {
+		status := "up"
+		alive := isBackendAlive(b.URL)
+		b.setAlive(alive)
+		if !alive {
+			status = "down"
+		}
+		logrus.Infof("Status of the server %s is %s", b.URL.String(), status)
+	}
+}
+
+var serverlist *ServerList
+
+// A goroutine to check the health of all backend services periodically
+func healthCheck() {
+	healthCheckTimer := time.NewTicker(2 * time.Minute)
+	for {
+		select {
+		case <-healthCheckTimer.C:
+			logrus.Infof("Starting Health check for all backend services")
+			serverlist.HealthCheck()
+			logrus.Infof("Health Check completed")
+		}
+	}
+}
+
 func main() {
 
 	// Create a list of Backend services without the Alive flag
@@ -81,6 +123,8 @@ func main() {
 
 	// Then run the go routine which periodically checks for the health status of the backend services
 	// Goroutine constantly periodically flags any unhealthy backend services
+
+	go healthCheck()
 
 	// Now for every request that comes, call the loadbalancer func
 
