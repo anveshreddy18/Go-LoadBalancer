@@ -57,6 +57,7 @@ func (s *ServerList) NextIndex() int {
 	return int(atomic.AddUint64(&s.current, uint64(1)) % uint64(len(s.backends)))
 }
 
+// GetNextPeer returns the next backend service that is alive.
 func (s *ServerList) GetNextPeer() *Backend {
 	nextInd := s.NextIndex()
 	// Now loop in a cyclic way to find the next backend service that is alive
@@ -71,7 +72,7 @@ func (s *ServerList) GetNextPeer() *Backend {
 	return nil
 }
 
-// It tries to establishes a tcp connection with the backend to see if it's alive
+// isBackendAlive tries to establishes a tcp connection with the backend to see if it's alive
 func isBackendAlive(url *url.URL) bool {
 	newConn, err := net.DialTimeout("tcp", url.Host, 2*time.Second)
 	if err != nil {
@@ -82,6 +83,7 @@ func isBackendAlive(url *url.URL) bool {
 	return true
 }
 
+// HealthCheck pings the backends and updates the status
 func (s *ServerList) HealthCheck() {
 	for _, b := range s.backends {
 		status := "up"
