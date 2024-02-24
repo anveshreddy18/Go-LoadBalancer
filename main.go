@@ -2,6 +2,7 @@ package main
 
 import (
 	"net"
+	"net/http"
 	"net/http/httputil"
 	"net/url"
 	"sync"
@@ -9,6 +10,11 @@ import (
 	"time"
 
 	"github.com/sirupsen/logrus"
+)
+
+const (
+	Attempts int = iota
+	Retry
 )
 
 // Define Backend struct
@@ -65,7 +71,9 @@ func (s *ServerList) GetNextPeer() *Backend {
 		curInd := i % len(s.backends)
 		if s.backends[curInd].isAlive() {
 			// Store this index in the s.current & return this backend
-			atomic.StoreUint64(&s.current, uint64(curInd))
+			if i != nextInd {
+				atomic.StoreUint64(&s.current, uint64(curInd))
+			}
 			return s.backends[curInd]
 		}
 	}
@@ -109,6 +117,29 @@ func healthCheck() {
 			logrus.Infof("Health Check completed")
 		}
 	}
+}
+
+func GetAttemptsFromContext(r *http.Request) int {
+	if retry, ok := r.Context().Value(Attempts).(int); ok {
+		return retry
+	}
+	return 1
+}
+
+func lb(w http.ResponseWriter, r *http.Request) {
+	attempts := GetAttemptsFromContext(r)
+	if attempts > 3 {
+		logrus.Infof("Max attempts reached for this session")
+		http.Error(w, "Service unavailable", http.StatusServiceUnavailable)
+		return
+	}
+
+	backend := serverlist.GetNextPeer()
+	if backend != nil {
+		backend.ReverseProxy.ServeHTTP(w, r)
+		return
+	}
+	http.Error(w, "Service unavailable", http.StatusServiceUnavailable)
 }
 
 func main() {
